@@ -6,7 +6,6 @@ name = "stm32-ccs811"
 version = "0.1.0"
 
 [dependencies]
-cortex-m = "0.6.0"
 cortex-m-rt = "0.6.10"
 cortex-m-semihosting = "0.3.3"
 panic-halt = "0.2.0"
@@ -15,15 +14,25 @@ panic-semihosting = "0.5.3"
 embedded-ccs811 = "0.1.0"
 embedded-hal = "0.2.4"
 asm-delay = "0.7.2"
-heapless = "0.5.5"
+heapless = { version = "0.5.5", features = ["ufmt-impl"] }
+usb-device = "0.2.5"
+usbd-serial = "0.1.0"
+stm32-usbd = { version = "0.5.1", features = ["ram_access_1x16"] }
+ufmt = "0.1.0"
+
+[dependencies.cortex-m]
+version = "0.6.2"
+# "inline-asm" optimizes away AsmDelay in release mode
+#features = ["inline-asm", "const-fn"]
+features = ["const-fn"]
 
 [dependencies.stm32f1xx-hal]
 version = "0.6.1"
-features = ["stm32f100", "medium", "rt"]
+features = ["stm32f103", "medium", "rt", "stm32-usbd"]
 
 [dependencies.stm32f1]
 version = "0.11.0"
-features = ["stm32f100", "rt"]
+features = ["stm32f103", "rt"]
 
 # this lets you use `cargo fix`!
 [[bin]]
