@@ -64,7 +64,7 @@ while True:
         etvoc = int(splitLine[1].split(":")[1].strip())
 
         if eco2 != 9999 and etvoc != 999:
-            print(f"Got new sample: eCO2=${eco2}ppm eTVOC=${etvoc}ppb")
+            print(f"Got new sample: eCO2={eco2}ppm eTVOC={etvoc}ppb")
             client.publish(eco2Topic, payload=eco2, qos=1)
             client.publish(etvocTopic, payload=etvoc, qos=1)
         else:
