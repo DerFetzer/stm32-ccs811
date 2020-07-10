@@ -4,42 +4,63 @@
 
 use rtic::app;
 
-
 use panic_semihosting as _;
 
 use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::prelude::*;
 
-use embedded_ccs811::{prelude::*, Ccs811, MeasurementMode, SlaveAddr, AlgorithmResult, InterruptMode};
-
-use stm32f1xx_hal::{
-    prelude::*,
-    delay::Delay,
-    i2c::{BlockingI2c, DutyCycle, Mode},
-    gpio::*,
-    usb::{Peripheral, UsbBus, UsbBusType},
-    timer::{Event as TimerEvent, Timer},
+use embedded_ccs811::{
+    prelude::*, AlgorithmResult, Ccs811, InterruptMode, MeasurementMode, SlaveAddr,
 };
-use asm_delay::{AsmDelay, bitrate};
 
-use heapless::Vec;
-use heapless::consts::*;
+use asm_delay::{bitrate, AsmDelay};
+use stm32f1xx_hal::{
+    delay::Delay,
+    gpio::*,
+    i2c::{BlockingI2c, DutyCycle, Mode},
+    prelude::*,
+    timer::{Event as TimerEvent, Timer},
+    usb::{Peripheral, UsbBus, UsbBusType},
+};
+
 use core::convert::TryInto;
+use heapless::consts::*;
+use heapless::Vec;
 
+use heapless::String;
+use ufmt::uwriteln;
 use usb_device::bus;
 use usb_device::prelude::*;
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
-use heapless::String;
-use ufmt::uwriteln;
 
 #[app(device = stm32f1xx_hal::pac, peripherals = true)]
 const APP: () = {
     struct Resources {
-        usb_dev: usb_device::device::UsbDevice<'static, stm32_usbd::bus::UsbBus<stm32f1xx_hal::usb::Peripheral>>,
+        usb_dev: usb_device::device::UsbDevice<
+            'static,
+            stm32_usbd::bus::UsbBus<stm32f1xx_hal::usb::Peripheral>,
+        >,
         serial: SerialPort<'static, stm32_usbd::bus::UsbBus<stm32f1xx_hal::usb::Peripheral>>,
         serial_rx_buf: Vec<u8, U128>,
         baseline_timer: stm32f1xx_hal::timer::CountDownTimer<stm32f1::stm32f103::TIM1>,
-        ccs811: Ccs811<stm32f1xx_hal::i2c::BlockingI2c<stm32f1::stm32f103::I2C1, (stm32f1xx_hal::gpio::gpiob::PB8<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>, stm32f1xx_hal::gpio::gpiob::PB9<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>)>, stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>, asm_delay::AsmDelay, embedded_ccs811::mode::App>,
+        ccs811: Ccs811<
+            stm32f1xx_hal::i2c::BlockingI2c<
+                stm32f1::stm32f103::I2C1,
+                (
+                    stm32f1xx_hal::gpio::gpiob::PB8<
+                        stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
+                    >,
+                    stm32f1xx_hal::gpio::gpiob::PB9<
+                        stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
+                    >,
+                ),
+            >,
+            stm32f1xx_hal::gpio::gpiob::PB7<
+                stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>,
+            >,
+            asm_delay::AsmDelay,
+            embedded_ccs811::mode::App,
+        >,
         int_pin: gpiob::PB6<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>,
         algo_res: AlgorithmResult,
     }
@@ -72,30 +93,6 @@ const APP: () = {
 
         let mut gpioa = cx.device.GPIOA.split(&mut rcc.apb2);
         let mut gpiob = cx.device.GPIOB.split(&mut rcc.apb2);
-
-        /*let mut debug_pin =  gpioa.pa10.into_push_pull_output(&mut gpioa.crh);
-
-        debug_pin.set_low().unwrap();
-        delay.delay_ms(5_u16);
-        debug_pin.set_high().unwrap();
-        delay.delay_ms(5_u16);
-        debug_pin.set_low().unwrap();
-        delay.delay_ms(5_u16);
-        debug_pin.set_high().unwrap();
-        delay.delay_ms(5_u16);
-        debug_pin.set_low().unwrap();
-
-        delay.delay_ms(10_u16);
-
-        debug_pin.set_low().unwrap();
-        asm_delay.delay_ms(5_u16);
-        debug_pin.set_high().unwrap();
-        asm_delay.delay_ms(5_u16);
-        debug_pin.set_low().unwrap();
-        asm_delay.delay_ms(5_u16);
-        debug_pin.set_high().unwrap();
-        asm_delay.delay_ms(5_u16);
-        debug_pin.set_low().unwrap();*/
 
         // USB Serial
 
@@ -160,21 +157,18 @@ const APP: () = {
         baseline_timer.listen(TimerEvent::Update);
 
         let address = SlaveAddr::Alternative(true);
-        let mut ccs811= Ccs811::new(i2c, address, nwake, asm_delay);
+        let mut ccs811 = Ccs811::new(i2c, address, nwake, asm_delay);
 
         ccs811.software_reset();
         delay.delay_ms(3_u16);
         let mut ccs811 = ccs811.start_application().ok().unwrap();
         delay.delay_ms(2_u8);
-        ccs811.set_interrupt_mode(InterruptMode::OnDataReady).unwrap();
-        ccs811.set_mode(MeasurementMode::LowPowerPulseHeating60s).unwrap();
-
-        // Get hw/sw versions
-        /*
-        let hw_version = ccs811.hardware_version().unwrap();
-        let bl_version = ccs811.firmware_bootloader_version().unwrap();
-        let app_version = ccs811.firmware_application_version().unwrap();
-        */
+        ccs811
+            .set_interrupt_mode(InterruptMode::OnDataReady)
+            .unwrap();
+        ccs811
+            .set_mode(MeasurementMode::LowPowerPulseHeating60s)
+            .unwrap();
 
         init::LateResources {
             usb_dev,
@@ -202,16 +196,20 @@ const APP: () = {
                 raw_voltage: 9999,
             };
 
-            *cx.resources.algo_res = cx.resources.ccs811.lock(|ccs811| {
-                ccs811.data().unwrap_or(default)
-            });
+            *cx.resources.algo_res = cx
+                .resources
+                .ccs811
+                .lock(|ccs811| ccs811.data().unwrap_or(default));
             let mut s: String<U128> = String::new();
-            uwriteln!(s, "eCO2: {}, eTVOC: {}, raw_current: {}, raw_voltage: {}\r",
-                     cx.resources.algo_res.eco2,
-                     cx.resources.algo_res.etvoc,
-                     cx.resources.algo_res.raw_current,
-                     cx.resources.algo_res.raw_voltage)
-                .unwrap();
+            uwriteln!(
+                s,
+                "eCO2: {}, eTVOC: {}, raw_current: {}, raw_voltage: {}\r",
+                cx.resources.algo_res.eco2,
+                cx.resources.algo_res.etvoc,
+                cx.resources.algo_res.raw_current,
+                cx.resources.algo_res.raw_voltage
+            )
+            .unwrap();
 
             cx.resources.serial.lock(|serial| {
                 if let Ok(_) = serial.flush() {
@@ -229,9 +227,10 @@ const APP: () = {
         static mut COUNT: u16 = 0;
 
         if *COUNT == 600 {
-            let baseline = cx.resources.ccs811.lock(|ccs811| {
-                ccs811.baseline().unwrap_or([0; 2])
-            });
+            let baseline = cx
+                .resources
+                .ccs811
+                .lock(|ccs811| ccs811.baseline().unwrap_or([0; 2]));
 
             let mut s: String<U64> = String::new();
             uwriteln!(s, "baseline: [{},{}]\r", baseline[0], baseline[1]).unwrap();
@@ -251,12 +250,22 @@ const APP: () = {
 
     #[task(binds = USB_HP_CAN_TX, priority = 3, resources = [usb_dev, serial, serial_rx_buf, ccs811])]
     fn usb_tx(mut cx: usb_tx::Context) {
-        usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.serial, &mut cx.resources.serial_rx_buf, &mut cx.resources.ccs811);
+        usb_poll(
+            &mut cx.resources.usb_dev,
+            &mut cx.resources.serial,
+            &mut cx.resources.serial_rx_buf,
+            &mut cx.resources.ccs811,
+        );
     }
 
     #[task(binds = USB_LP_CAN_RX0, priority = 3, resources = [usb_dev, serial, serial_rx_buf, ccs811])]
     fn usb_rx0(mut cx: usb_rx0::Context) {
-        usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.serial, &mut cx.resources.serial_rx_buf, &mut cx.resources.ccs811);
+        usb_poll(
+            &mut cx.resources.usb_dev,
+            &mut cx.resources.serial,
+            &mut cx.resources.serial_rx_buf,
+            &mut cx.resources.ccs811,
+        );
     }
 
     extern "C" {
@@ -270,7 +279,22 @@ fn usb_poll<B: bus::UsbBus>(
     usb_dev: &mut UsbDevice<'static, B>,
     serial: &mut SerialPort<'static, B>,
     buf: &mut Vec<u8, U128>,
-    ccs811: &mut Ccs811<stm32f1xx_hal::i2c::BlockingI2c<stm32f1::stm32f103::I2C1, (stm32f1xx_hal::gpio::gpiob::PB8<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>, stm32f1xx_hal::gpio::gpiob::PB9<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>)>, stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>, asm_delay::AsmDelay, embedded_ccs811::mode::App>,
+    ccs811: &mut Ccs811<
+        stm32f1xx_hal::i2c::BlockingI2c<
+            stm32f1::stm32f103::I2C1,
+            (
+                stm32f1xx_hal::gpio::gpiob::PB8<
+                    stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
+                >,
+                stm32f1xx_hal::gpio::gpiob::PB9<
+                    stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
+                >,
+            ),
+        >,
+        stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>,
+        asm_delay::AsmDelay,
+        embedded_ccs811::mode::App,
+    >,
 ) {
     if !usb_dev.poll(&mut [serial]) {
         return;
@@ -284,57 +308,48 @@ fn usb_poll<B: bus::UsbBus>(
                 match c {
                     13 => {
                         if !buf.is_empty() {
-                            let res= match buf[0] {
-                                0x62 => {
-                                    match buf.len() {
-                                        3 => {
-                                            match ccs811.set_baseline(buf[1..3].try_into().unwrap()) {
-                                                Ok(_) => Ok(()),
-                                                Err(_) => Err("Could not set baseline!")
-                                            }
-                                        },
-                                        _ => Err("Command too short!")
+                            let res = match buf[0] {
+                                0x62 => match buf.len() {
+                                    3 => match ccs811.set_baseline(buf[1..3].try_into().unwrap()) {
+                                        Ok(_) => Ok(()),
+                                        Err(_) => Err("Could not set baseline!"),
+                                    },
+                                    _ => Err("Command too short!"),
+                                },
+                                0x65 => match buf.len() {
+                                    9 => {
+                                        let hum = f32::from_be_bytes(buf[1..5].try_into().unwrap());
+                                        let temp =
+                                            f32::from_be_bytes(buf[5..9].try_into().unwrap());
+                                        match ccs811.set_environment(hum, temp) {
+                                            Ok(_) => Ok(()),
+                                            Err(_) => Err("Could not set environment!"),
+                                        }
                                     }
-                                }
-                                0x65 => {
-                                    match buf.len() {
-                                        9 => {
-                                            let hum = f32::from_be_bytes(buf[1..5].try_into().unwrap());
-                                            let temp = f32::from_be_bytes(buf[5..9].try_into().unwrap());
-                                            match ccs811.set_environment(hum, temp) {
-                                                Ok(_) => Ok(()),
-                                                Err(_) => Err("Could not set environment!")
-                                            }
-                                        },
-                                        _ => Err("Command too short!")
-                                    }
-                                }
-                                0x6D => {
-                                    match buf.len() {
-                                        2 => {
-                                            let mode = match buf[1] {
-                                                0x30 => Ok(MeasurementMode::Idle),
-                                                0x31 => Ok(MeasurementMode::ConstantPower1s),
-                                                0x32 => Ok(MeasurementMode::PulseHeating10s),
-                                                0x33 => Ok(MeasurementMode::LowPowerPulseHeating60s),
-                                                0x34 => Ok(MeasurementMode::ConstantPower250ms),
-                                                _ => Err("Invalid measurement mode!")
-                                            };
+                                    _ => Err("Command too short!"),
+                                },
+                                0x6D => match buf.len() {
+                                    2 => {
+                                        let mode = match buf[1] {
+                                            0x30 => Ok(MeasurementMode::Idle),
+                                            0x31 => Ok(MeasurementMode::ConstantPower1s),
+                                            0x32 => Ok(MeasurementMode::PulseHeating10s),
+                                            0x33 => Ok(MeasurementMode::LowPowerPulseHeating60s),
+                                            0x34 => Ok(MeasurementMode::ConstantPower250ms),
+                                            _ => Err("Invalid measurement mode!"),
+                                        };
 
-                                            match mode {
-                                                Ok(m) => {
-                                                    match ccs811.set_mode(m) {
-                                                        Ok(_) => Ok(()),
-                                                        Err(_) => Err("Could not set mode!")
-                                                    }
-                                                }
-                                                Err(e) => Err(e)
-                                            }
-                                        },
-                                        _ => Err("Command too short!")
+                                        match mode {
+                                            Ok(m) => match ccs811.set_mode(m) {
+                                                Ok(_) => Ok(()),
+                                                Err(_) => Err("Could not set mode!"),
+                                            },
+                                            Err(e) => Err(e),
+                                        }
                                     }
-                                }
-                                _ => Err("Invalid command!")
+                                    _ => Err("Command too short!"),
+                                },
+                                _ => Err("Invalid command!"),
                             };
                             match res {
                                 Ok(_) => serial.write("OK\r\n".as_bytes()).unwrap(),
@@ -342,18 +357,19 @@ fn usb_poll<B: bus::UsbBus>(
                                     let mut s: String<U64> = String::new();
                                     uwriteln!(s, "ERR: {}\r", e).unwrap();
                                     serial.write(s.as_bytes()).unwrap()
-                                },
+                                }
                             };
                             buf.clear();
                         };
-                }
-                    b => if let Err(_) = buf.push(*b) {
-                        buf.clear()
+                    }
+                    b => {
+                        if let Err(_) = buf.push(*b) {
+                            buf.clear()
+                        }
                     }
                 }
             }
         }
-        _ => ()
+        _ => (),
     }
 }
-
