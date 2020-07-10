@@ -58,7 +58,7 @@ const APP: () = {
             stm32f1xx_hal::gpio::gpiob::PB7<
                 stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>,
             >,
-            asm_delay::AsmDelay,
+            stm32f1xx_hal::delay::Delay,
             embedded_ccs811::mode::App,
         >,
         int_pin: gpiob::PB6<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>,
@@ -87,6 +87,8 @@ const APP: () = {
         assert!(clocks.usbclk_valid());
 
         let mut delay = Delay::new(cx.core.SYST, clocks);
+
+        // Tuned delay frequency with oscilloscope
         let mut asm_delay = AsmDelay::new(bitrate::U32BitrateExt::mhz(77));
 
         let mut afio = cx.device.AFIO.constrain(&mut rcc.apb2);
@@ -102,7 +104,7 @@ const APP: () = {
         // will not reset your device when you upload new firmware.
         let mut usb_dp = gpioa.pa12.into_push_pull_output(&mut gpioa.crh);
         usb_dp.set_low().unwrap();
-        delay.delay_ms(100_u16);
+        asm_delay.delay_ms(100_u16);
         let usb_dm = gpioa.pa11;
         let usb_dp = usb_dp.into_floating_input(&mut gpioa.crh);
 
@@ -157,12 +159,12 @@ const APP: () = {
         baseline_timer.listen(TimerEvent::Update);
 
         let address = SlaveAddr::Alternative(true);
-        let mut ccs811 = Ccs811::new(i2c, address, nwake, asm_delay);
+        let mut ccs811 = Ccs811::new(i2c, address, nwake, delay);
 
         ccs811.software_reset();
-        delay.delay_ms(3_u16);
+        asm_delay.delay_ms(4_u16);
         let mut ccs811 = ccs811.start_application().ok().unwrap();
-        delay.delay_ms(2_u8);
+        asm_delay.delay_ms(3_u8);
         ccs811
             .set_interrupt_mode(InterruptMode::OnDataReady)
             .unwrap();
@@ -292,7 +294,7 @@ fn usb_poll<B: bus::UsbBus>(
             ),
         >,
         stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>,
-        asm_delay::AsmDelay,
+        stm32f1xx_hal::delay::Delay,
         embedded_ccs811::mode::App,
     >,
 ) {
