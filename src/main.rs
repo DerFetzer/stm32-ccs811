@@ -2,6 +2,8 @@
 #![no_main]
 #![no_std]
 
+mod types;
+
 use rtic::app;
 
 use panic_semihosting as _;
@@ -18,13 +20,13 @@ use stm32f1xx_hal::{
     delay::Delay,
     gpio::*,
     i2c::{BlockingI2c, DutyCycle, Mode},
+    pac::TIM1,
     prelude::*,
     timer::{Event as TimerEvent, Timer},
     usb::{Peripheral, UsbBus, UsbBusType},
 };
 
 use core::convert::TryInto;
-use heapless::consts::*;
 use heapless::Vec;
 
 use heapless::String;
@@ -33,35 +35,17 @@ use usb_device::bus;
 use usb_device::prelude::*;
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
+use crate::types::{Ccs811Type, IntPinType};
+
 #[app(device = stm32f1xx_hal::pac, peripherals = true)]
 const APP: () = {
     struct Resources {
-        usb_dev: usb_device::device::UsbDevice<
-            'static,
-            stm32_usbd::bus::UsbBus<stm32f1xx_hal::usb::Peripheral>,
-        >,
-        serial: SerialPort<'static, stm32_usbd::bus::UsbBus<stm32f1xx_hal::usb::Peripheral>>,
-        serial_rx_buf: Vec<u8, U128>,
-        baseline_timer: stm32f1xx_hal::timer::CountDownTimer<stm32f1::stm32f103::TIM1>,
-        ccs811: Ccs811<
-            stm32f1xx_hal::i2c::BlockingI2c<
-                stm32f1::stm32f103::I2C1,
-                (
-                    stm32f1xx_hal::gpio::gpiob::PB8<
-                        stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
-                    >,
-                    stm32f1xx_hal::gpio::gpiob::PB9<
-                        stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
-                    >,
-                ),
-            >,
-            stm32f1xx_hal::gpio::gpiob::PB7<
-                stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>,
-            >,
-            stm32f1xx_hal::delay::Delay,
-            embedded_ccs811::mode::App,
-        >,
-        int_pin: gpiob::PB6<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>,
+        usb_dev: usb_device::device::UsbDevice<'static, UsbBusType>,
+        serial: SerialPort<'static, UsbBusType>,
+        serial_rx_buf: Vec<u8, 128>,
+        baseline_timer: stm32f1xx_hal::timer::CountDownTimer<TIM1>,
+        ccs811: Ccs811Type,
+        int_pin: IntPinType,
         algo_res: AlgorithmResult,
     }
 
@@ -86,7 +70,7 @@ const APP: () = {
 
         assert!(clocks.usbclk_valid());
 
-        let mut delay = Delay::new(cx.core.SYST, clocks);
+        let delay = Delay::new(cx.core.SYST, clocks);
 
         // Tuned delay frequency with oscilloscope
         let mut asm_delay = AsmDelay::new(bitrate::U32BitrateExt::mhz(77));
@@ -161,7 +145,7 @@ const APP: () = {
         let address = SlaveAddr::Alternative(true);
         let mut ccs811 = Ccs811::new(i2c, address, nwake, delay);
 
-        ccs811.software_reset();
+        ccs811.software_reset().unwrap_or(());
         asm_delay.delay_ms(4_u16);
         let mut ccs811 = ccs811.start_application().ok().unwrap();
         asm_delay.delay_ms(3_u8);
@@ -175,7 +159,7 @@ const APP: () = {
         init::LateResources {
             usb_dev,
             serial,
-            serial_rx_buf: Vec::<u8, U128>::new(),
+            serial_rx_buf: Vec::<u8, 128>::new(),
             baseline_timer,
             ccs811,
             int_pin,
@@ -202,7 +186,7 @@ const APP: () = {
                 .resources
                 .ccs811
                 .lock(|ccs811| ccs811.data().unwrap_or(default));
-            let mut s: String<U128> = String::new();
+            let mut s: String<128> = String::new();
             uwriteln!(
                 s,
                 "eCO2: {}, eTVOC: {}, raw_current: {}, raw_voltage: {}\r",
@@ -214,7 +198,7 @@ const APP: () = {
             .unwrap();
 
             cx.resources.serial.lock(|serial| {
-                if let Ok(_) = serial.flush() {
+                if serial.flush().is_ok() {
                     serial.write(s.as_bytes()).unwrap();
                 }
             });
@@ -234,11 +218,11 @@ const APP: () = {
                 .ccs811
                 .lock(|ccs811| ccs811.baseline().unwrap_or([0; 2]));
 
-            let mut s: String<U64> = String::new();
+            let mut s: String<64> = String::new();
             uwriteln!(s, "baseline: [{},{}]\r", baseline[0], baseline[1]).unwrap();
 
             cx.resources.serial.lock(|serial| {
-                if let Ok(_) = serial.flush() {
+                if serial.flush().is_ok() {
                     serial.write(s.as_bytes()).unwrap();
                 }
             });
@@ -256,7 +240,7 @@ const APP: () = {
             &mut cx.resources.usb_dev,
             &mut cx.resources.serial,
             &mut cx.resources.serial_rx_buf,
-            &mut cx.resources.ccs811,
+            cx.resources.ccs811,
         );
     }
 
@@ -266,7 +250,7 @@ const APP: () = {
             &mut cx.resources.usb_dev,
             &mut cx.resources.serial,
             &mut cx.resources.serial_rx_buf,
-            &mut cx.resources.ccs811,
+            cx.resources.ccs811,
         );
     }
 
@@ -280,23 +264,8 @@ const APP: () = {
 fn usb_poll<B: bus::UsbBus>(
     usb_dev: &mut UsbDevice<'static, B>,
     serial: &mut SerialPort<'static, B>,
-    buf: &mut Vec<u8, U128>,
-    ccs811: &mut Ccs811<
-        stm32f1xx_hal::i2c::BlockingI2c<
-            stm32f1::stm32f103::I2C1,
-            (
-                stm32f1xx_hal::gpio::gpiob::PB8<
-                    stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
-                >,
-                stm32f1xx_hal::gpio::gpiob::PB9<
-                    stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
-                >,
-            ),
-        >,
-        stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>,
-        stm32f1xx_hal::delay::Delay,
-        embedded_ccs811::mode::App,
-    >,
+    buf: &mut Vec<u8, 128>,
+    ccs811: &mut Ccs811Type,
 ) {
     if !usb_dev.poll(&mut [serial]) {
         return;
@@ -356,7 +325,7 @@ fn usb_poll<B: bus::UsbBus>(
                             match res {
                                 Ok(_) => serial.write("OK\r\n".as_bytes()).unwrap(),
                                 Err(e) => {
-                                    let mut s: String<U64> = String::new();
+                                    let mut s: String<64> = String::new();
                                     uwriteln!(s, "ERR: {}\r", e).unwrap();
                                     serial.write(s.as_bytes()).unwrap()
                                 }
@@ -365,7 +334,7 @@ fn usb_poll<B: bus::UsbBus>(
                         };
                     }
                     b => {
-                        if let Err(_) = buf.push(*b) {
+                        if buf.push(*b).is_err() {
                             buf.clear()
                         }
                     }
